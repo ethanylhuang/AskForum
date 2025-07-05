@@ -1,38 +1,60 @@
 from google import genai
 from google.genai import types
 import os
+from pathlib import Path
+from search import google_search
 
 class Gemini:
     def __init__(self):
         self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-        self.search = types.Tool(google_search=types.GoogleSearch())
-        self.config = types.GenerateContentConfig(tools=[self.search])
+        
+        script_dir = Path(__file__).parent
+        self.url_prompt = self._load_file(script_dir / "url_instruction.txt", "Generate search terms for: ")
+        system_instruction = self._load_file(script_dir / "system_instruction.txt", "You are a helpful assistant.")
+        
+        self.config = types.GenerateContentConfig(
+            tools=[types.Tool(url_context=types.UrlContext())], 
+            system_instruction=system_instruction
+        )
+        self.search_config = types.GenerateContentConfig(system_instruction="Generate search terms as requested.")
 
-    def generate_response(self, prompt):
-        response = self.client.models.generate_content(model="gemini-2.5-flash", contents=prompt, config=self.config)
-        return self.add_citations(response)
-
-    def add_citations(self, response):
-        text = response.text
+    def _load_file(self, file_path, default_content):
         try:
-            chunks = response.candidates[0].grounding_metadata.grounding_chunks
-            citations_data = []
-            for chunk in chunks:
-                if hasattr(chunk, 'web'):
-                    title = getattr(chunk.web, 'title', 'Unknown')
-                    uri = chunk.web.uri
-                    citations_data.append((title, uri))
-            
-            if citations_data:
-                unique_citations = []
-                seen = set()
-                for title, uri in citations_data:
-                    if uri not in seen:
-                        unique_citations.append((title, uri))
-                        seen.add(uri)
-                
-                citations = "\n".join(f"[{i+1}] {title} - {uri}" for i, (title, uri) in enumerate(unique_citations))
-                text += f"\n\nSources:\n{citations}"
-        except (AttributeError, IndexError, TypeError):
-            pass
-        return text
+            return open(file_path, "r", encoding="utf-8").read().strip()
+        except FileNotFoundError:
+            return default_content
+
+    def get_reddit_urls(self, prompt):
+        search_terms = self.client.models.generate_content(
+            model="gemini-2.5-flash", 
+            contents=self.url_prompt + prompt, 
+            config=self.search_config
+        )
+        search_lines = [line.strip() for line in (search_terms.text or "").split('\n') if line.strip()]
+        
+        all_urls = []
+        for search_term in search_lines:
+            results = google_search(search_term).get("organic_results", [])
+            all_urls.extend([r["link"] for r in results if "reddit.com" in r.get("link", "")])
+        
+        unique_urls = list(dict.fromkeys(all_urls))
+        return unique_urls[:19] if len(unique_urls) > 19 else unique_urls
+
+    def generate_response_from_urls(self, prompt, urls):
+        if not urls:
+            return "No URLs provided for analysis."
+        
+        try:
+            response = self.client.models.generate_content(
+                model="gemini-2.5-flash", 
+                contents=f"{prompt}\n\nPlease summarize the following URLs: {', '.join(urls)}", 
+                config=self.config
+            )
+            return response.text or ""
+        except Exception:
+            return self.generate_response_from_urls(prompt, urls[:5]) if len(urls) > 5 else "Sorry, I couldn't analyze the URLs."
+
+    def generate(self, prompt):
+        urls = self.get_reddit_urls(prompt)
+        response = self.generate_response_from_urls(prompt, urls) or "Sorry, I couldn't generate a response."
+        return f"{response}\n\nSources:\n" + "\n".join(urls)

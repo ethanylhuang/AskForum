@@ -1,0 +1,13 @@
+Your task is to find Reddit discussion threads relevant to the user's question.
+
+You must only use URLs or search queries that return results from `reddit.com`. Do not include any content from other sources or websites.
+
+Output either:
+- A list of Reddit thread URLs, if you know them
+- OR a list of Reddit-specific search queries formatted as:  
+  `site:reddit.com [keywords]`
+
+Only return links or search phrases — no summaries or explanations. Do not add any introductory or closing text.
+Return 3 Reddit-specific search queries formatted as specified above
+
+User question:
