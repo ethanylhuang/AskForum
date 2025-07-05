@@ -16,9 +16,22 @@ class Gemini:
         text = response.text
         try:
             chunks = response.candidates[0].grounding_metadata.grounding_chunks
-            urls = [chunk.web.uri for chunk in chunks if hasattr(chunk, 'web')]
-            if urls:
-                citations = "\n".join(f"[{i+1}] {url}" for i, url in enumerate(set(urls)))
+            citations_data = []
+            for chunk in chunks:
+                if hasattr(chunk, 'web'):
+                    title = getattr(chunk.web, 'title', 'Unknown')
+                    uri = chunk.web.uri
+                    citations_data.append((title, uri))
+            
+            if citations_data:
+                unique_citations = []
+                seen = set()
+                for title, uri in citations_data:
+                    if uri not in seen:
+                        unique_citations.append((title, uri))
+                        seen.add(uri)
+                
+                citations = "\n".join(f"[{i+1}] {title} - {uri}" for i, (title, uri) in enumerate(unique_citations))
                 text += f"\n\nSources:\n{citations}"
         except (AttributeError, IndexError, TypeError):
             pass
